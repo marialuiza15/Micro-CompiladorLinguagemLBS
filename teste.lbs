@@ -1,2 +1,3 @@
 function
-ret $30
+ret $400
+end

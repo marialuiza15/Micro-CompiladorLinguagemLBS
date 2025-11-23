@@ -9,15 +9,14 @@ void add_prologo(unsigned char code[]) {
 }
 
 void add_epilogo(unsigned char code[]) {
-    unsigned char epilogo[2] = {0xC9, 0xC3};
-    memcpy(code, epilogo, sizeof(epilogo)); 
+    i += 4;
+    code[i++] = 0xC3;
 }
 
 void retorna_const(unsigned char code[],int i, int valor) {
     code[i++] = 0xB8;
     memcpy(&code[i], &valor, 4); 
-    i += 4;
-    code[i++] = 0xC3;
+
 }
 
 void gera_codigo (FILE *f, unsigned char code[], funcp *entry) {

@@ -1,16 +1,2 @@
 function
-v0 = p0 + $10
-call 1 v0
-ret v0
-end
-
-function
-v0 = p0 + $20
-call 2 v0
-ret v0
-end
-
-function
-v0 = p0 + $10
-ret v0
-end
+ret $30

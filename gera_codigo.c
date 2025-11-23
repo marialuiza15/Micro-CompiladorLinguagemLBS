@@ -238,6 +238,62 @@ static int atribui_var(unsigned char code[], int v1, int v2, int i) {
     return i;
 }
 
+
+// NOVA FUNÇÃO: Implementação do retorno condicional
+static int retorno_condicional(unsigned char code[], int i, int cond_var, int ret_var) {
+    unsigned char disp_cond, disp_ret;
+    
+    // Carregar variável de condição em EAX
+    if (!get_disp_for_vn(cond_var, &disp_cond)) {
+        fprintf(stderr, "Erro: vn inválido no zret (condição): v%d\n", cond_var);
+        return i;
+    }
+    code[i++] = 0x8B; code[i++] = 0x45; code[i++] = disp_cond;
+    
+    // Testar se é zero (test eax, eax)
+    code[i++] = 0x85; code[i++] = 0xC0;
+    
+    // Jump se não zero (continuar execução)
+    code[i++] = 0x75; 
+    int jump_pos = i;  // Posição para pular se condição não for zero
+    code[i++] = 0x00;  // Placeholder para o offset
+    
+    // Se zero: carregar valor de retorno e retornar
+    if (!get_disp_for_vn(ret_var, &disp_ret)) {
+        fprintf(stderr, "Erro: vn inválido no zret (retorno): v%d\n", ret_var);
+        return i;
+    }
+    code[i++] = 0x8B; code[i++] = 0x45; code[i++] = disp_ret;
+    
+    // Epílogo e retorno
+    i = add_epilogo(code, i);
+    
+    // Calcular e preencher o jump offset
+    int jump_offset = i - (jump_pos + 1);
+    code[jump_pos] = (unsigned char)jump_offset;
+    
+    return i;
+}
+
+// NOVA FUNÇÃO: Implementação do retorno incondicional com variável
+static int retorno_incondicional_var(unsigned char code[], int i, int ret_var) {
+    unsigned char disp;
+    
+    // Carregar valor de retorno
+    if (!get_disp_for_vn(ret_var, &disp)) {
+        fprintf(stderr, "Erro: vn inválido no ret: v%d\n", ret_var);
+        return i;
+    }
+    code[i++] = 0x8B; code[i++] = 0x45; code[i++] = disp;
+    
+    // Epílogo e retorno
+    i = add_epilogo(code, i);
+    
+    return i;
+}
+
+
+
 static void dump_bytes(const unsigned char* buf, int len) {
     fprintf(stderr, "Generated %d bytes:\n", len);
     for (int j = 0; j < len; ++j) {
@@ -283,6 +339,18 @@ void gera_codigo(FILE* f, unsigned char code[], funcp* entry) {
             func_offsets[func_count++] = i;
             i = add_prologo(code, i);
             started = 1;
+            continue;
+        }
+
+        // NOVO: Retorno condicional 'zret vX vY'
+        if (sscanf(linha, "zret v%d v%d", &v1, &v2) == 2) {
+            i = retorno_condicional(code, i, v1, v2);
+            continue;
+        }
+
+        // NOVO: Retorno incondicional com variável 'ret vX'
+        if (sscanf(linha, "ret v%d", &v) == 1) {
+            i = retorno_incondicional_var(code, i, v);
             continue;
         }
 

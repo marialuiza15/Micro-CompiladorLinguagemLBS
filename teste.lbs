@@ -1,3 +1,10 @@
 function
-ret $400
+v0 = p0 + $20
+v1 = call 1 v0
+ret v1
+end
+
+function
+v0 = p0 + $20
+ret v0
 end

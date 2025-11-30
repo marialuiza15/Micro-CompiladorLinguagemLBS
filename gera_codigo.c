@@ -2,7 +2,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
-#include <sys/mman.h>  // Para mmap e mprotect
+#include <sys/mman.h>  
 #include "gera_codigo.h"
 
 #define CODE_SIZE 300
@@ -11,7 +11,12 @@ typedef enum { OP_CONST, OP_VAR, OP_PARAM } OpType;
 typedef struct { OpType type; int value; } Operand;
 
 static int add_prologo(unsigned char code[], int i) {
-    unsigned char prologo[8] = { 0x55, 0x48, 0x89, 0xE5, 0x48, 0x83, 0xEC, 0x20 };
+    unsigned char prologo[] = {
+        0x55,                        
+        0x48, 0x89, 0xE5,             
+        0x48, 0x83, 0xEC, 0x20,       
+        0x89, 0x7D, 0xFC              
+    };
     memcpy(&code[i], prologo, sizeof(prologo));
     return i + sizeof(prologo);
 }
@@ -22,14 +27,14 @@ static int add_epilogo(unsigned char code[], int i) {
     return i + sizeof(epilogo);
 }
 
-static int get_disp_for_vn(int vn, unsigned char* out_disp) {
+static int obter_deslocamento_para_vn(int vn, unsigned char* out_disp) {
     if (out_disp == NULL) return 0;
     switch (vn) {
-    case 0: *out_disp = (unsigned char)0xEC; return 1; // -20(%rbp) (para v0)
-    case 1: *out_disp = (unsigned char)0xF0; return 1; // -16(%rbp) (para v1)
-    case 2: *out_disp = (unsigned char)0xF4; return 1; // -12(%rbp) (para v2)
-    case 3: *out_disp = (unsigned char)0xF8; return 1; // -8(%rbp) (para v3)
-    case 4: *out_disp = (unsigned char)0xFC; return 1; // -4(%rbp) (para v4)
+    case 0: *out_disp = (unsigned char)0xF8; return 1; // -8(%rbp)   v0
+    case 1: *out_disp = (unsigned char)0xF4; return 1; // -12(%rbp)  v1
+    case 2: *out_disp = (unsigned char)0xF0; return 1; // -16(%rbp)  v2
+    case 3: *out_disp = (unsigned char)0xEC; return 1; // -20(%rbp)  v3
+    case 4: *out_disp = (unsigned char)0xE8; return 1; // -24(%rbp)  v4
     default:
         return 0;
     }
@@ -43,9 +48,8 @@ static int retorna_const(unsigned char code[], int i, int valor) {
 }
 
 static int efetua_op(unsigned char code[], int vn, int i) {
-    // corrigido
     unsigned char disp;
-    if (!get_disp_for_vn(vn, &disp)) {
+    if (!obter_deslocamento_para_vn(vn, &disp)) {
         fprintf(stderr, "Erro: índice de v inválido: %d\n", vn);
         return i;
     }
@@ -57,7 +61,7 @@ static int efetua_op(unsigned char code[], int vn, int i) {
 
 static int movvar_eax(unsigned char code[], int i, int vn) {
     unsigned char disp;
-    if (!get_disp_for_vn(vn, &disp)) {
+    if (!obter_deslocamento_para_vn(vn, &disp)) {
         fprintf(stderr, "Erro: ret v%d não suportado\n", vn);
         return i;
     }
@@ -68,31 +72,35 @@ static int movvar_eax(unsigned char code[], int i, int vn) {
 }
 
 static int movpar_eax(unsigned char code[], int i) {
-    // corrigido
     code[i++] = 0x89;
     code[i++] = 0xF8;
     return i;
 }
 
 static int carrega_token_edi(unsigned char code[], int i, const char* tok) {
-    // corrigido
     unsigned char disp;
     if (tok == NULL) return i;
+
     if (tok[0] == '$') {
         int val = (int)strtol(tok + 1, NULL, 0);
-        code[i++] = 0xBF; 
+        code[i++] = 0xBF;       
         memcpy(&code[i], &val, 4);
         i += 4;
     }
     else if (tok[0] == 'v') {
         int vn = atoi(tok + 1);
-        if (!get_disp_for_vn(vn, &disp)) {
+        if (!obter_deslocamento_para_vn(vn, &disp)) {
             fprintf(stderr, "Erro: vn inválido no load arg: v%d\n", vn);
             return i;
         }
-        code[i++] = 0x8B; 
-        code[i++] = 0x7D; 
+        code[i++] = 0x8B;             
+        code[i++] = 0x7D;
         code[i++] = disp;
+    }
+    else if (tok[0] == 'p' && tok[1] == '0' && tok[2] == '\0') {
+        code[i++] = 0x8B;            
+        code[i++] = 0x7D;
+        code[i++] = 0xFC;
     }
     else {
         fprintf(stderr, "Erro: token de argumento desconhecido: %s\n", tok);
@@ -100,7 +108,8 @@ static int carrega_token_edi(unsigned char code[], int i, const char* tok) {
     return i;
 }
 
-static int parse_token_to_operand(const char* tok, Operand* out) {
+
+static int parsear_token_para_operando(const char* tok, Operand* out) {
     if (tok == NULL || out == NULL) return 0;
     if (tok[0] == '$') {
         long val = strtol(tok + 1, NULL, 0);
@@ -122,8 +131,7 @@ static int parse_token_to_operand(const char* tok, Operand* out) {
     return 0;
 }
 
-/* Funções auxiliares para opera_exp_general (mantidas como antes) */
-static int emit_load_eax_from_operand(unsigned char code[], int i, Operand opnd) {
+static int gerar_codigo_load_eax(unsigned char code[], int i, Operand opnd) {
     // corrigido
     unsigned char disp;
     switch (opnd.type) {
@@ -133,7 +141,7 @@ static int emit_load_eax_from_operand(unsigned char code[], int i, Operand opnd)
         i += 4;
         break;
     case OP_VAR:
-        if (!get_disp_for_vn(opnd.value, &disp)) {
+        if (!obter_deslocamento_para_vn(opnd.value, &disp)) {
             fprintf(stderr, "Erro: vn inválido no load: v%d\n", opnd.value);
             return i;
         }
@@ -142,53 +150,56 @@ static int emit_load_eax_from_operand(unsigned char code[], int i, Operand opnd)
         code[i++] = disp;
         break;
     case OP_PARAM:
-        code[i++] = 0x89; 
-        code[i++] = 0xF8;
+        code[i++] = 0x8B;  
+        code[i++] = 0x45;
+        code[i++] = 0xFC;
         break;
     }
     return i;
 }
 
-static int emit_load_ecx_from_operand(unsigned char code[], int i, Operand opnd) {
+static int gerar_codigo_load_ecx(unsigned char code[], int i, Operand opnd) {
     unsigned char disp;
     switch (opnd.type) {
     case OP_CONST:
-        code[i++] = 0xB9; // mov ecx, imm32
+        code[i++] = 0xB9;
         memcpy(&code[i], &opnd.value, 4);
         i += 4;
         break;
     case OP_VAR:
-        if (!get_disp_for_vn(opnd.value, &disp)) {
+        if (!obter_deslocamento_para_vn(opnd.value, &disp)) {
             fprintf(stderr, "Erro: vn inválido no load ecx: v%d\n", opnd.value);
             return i;
         }
-        code[i++] = 0x8B; // mov ecx, [rbp-disp]
-        code[i++] = 0x45;
+        code[i++] = 0x8B; 
+        code[i++] = 0x4D;
         code[i++] = disp;
         break;
     case OP_PARAM:
-        // ecx já contém p0
+        code[i++] = 0x8B;  
+        code[i++] = 0x4D;
+        code[i++] = 0xFC; 
         break;
     }
     return i;
 }
 
-static int emit_apply_op_with_rhs(unsigned char code[], int i, char op, Operand rhs) {
+static int emitir_operacao_com_operando_direito(unsigned char code[], int i, char op, Operand rhs) {
     if (rhs.type == OP_CONST) {
         int imm = rhs.value;
         switch (op) {
         case '+':
-            code[i++] = 0x05; // add eax, imm32
+            code[i++] = 0x05; 
             memcpy(&code[i], &imm, 4);
             i += 4;
             break;
         case '-':
-            code[i++] = 0x2D; // sub eax, imm32
+            code[i++] = 0x2D; 
             memcpy(&code[i], &imm, 4);
             i += 4;
             break;
         case '*':
-            code[i++] = 0x69; // imul eax, eax, imm32
+            code[i++] = 0x69; 
             code[i++] = 0xC0;
             memcpy(&code[i], &imm, 4);
             i += 4;
@@ -196,16 +207,16 @@ static int emit_apply_op_with_rhs(unsigned char code[], int i, char op, Operand 
         }
     }
     else {
-        i = emit_load_ecx_from_operand(code, i, rhs);
+        i = gerar_codigo_load_ecx(code, i, rhs);
         switch (op) {
         case '+':
-            code[i++] = 0x01; code[i++] = 0xF8; // add eax, ecx
+            code[i++] = 0x01; code[i++] = 0xC8; 
             break;
         case '-':
-            code[i++] = 0x29; code[i++] = 0xF8; // sub eax, ecx
+            code[i++] = 0x29; code[i++] = 0xC8; 
             break;
         case '*':
-            code[i++] = 0x0F; code[i++] = 0xAF; code[i++] = 0xC7; // imul eax, ecx
+            code[i++] = 0x0F; code[i++] = 0xAF; code[i++] = 0xC1; 
             break;
         }
     }
@@ -213,89 +224,69 @@ static int emit_apply_op_with_rhs(unsigned char code[], int i, char op, Operand 
 }
 
 
-static int opera_exp_general(unsigned char code[], int i, int dest_v, Operand lhs, char op, Operand rhs) {
-    i = emit_load_eax_from_operand(code, i, lhs);
-    i = emit_apply_op_with_rhs(code, i, op, rhs);
+static int gerar_codigo_operacao_binaria(unsigned char code[], int i, int dest_v, Operand lhs, char op, Operand rhs) {
+    i = gerar_codigo_load_eax(code, i, lhs);
+    i = emitir_operacao_com_operando_direito(code, i, op, rhs);
     unsigned char disp;
-    if (!get_disp_for_vn(dest_v, &disp)) {
+    if (!obter_deslocamento_para_vn(dest_v, &disp)) {
         fprintf(stderr, "Erro: dest vn inválido: v%d\n", dest_v);
         return i;
     }
     code[i++] = 0x89; 
     code[i++] = 0x45; 
-    code[i++] = disp; // mov [rbp-disp], eax
+    code[i++] = disp; 
     return i;
 }
 
 static int atribui_var(unsigned char code[], int v1, int v2, int i) {
     unsigned char disp1, disp2;
-    if (!get_disp_for_vn(v1, &disp1) || !get_disp_for_vn(v2, &disp2)) {
+    if (!obter_deslocamento_para_vn(v1, &disp1) || !obter_deslocamento_para_vn(v2, &disp2)) {
         fprintf(stderr, "Erro: índice de v inválido em atribuição v%d = v%d\n", v1, v2);
         return i;
     }
-    code[i++] = 0x8B; code[i++] = 0x45; code[i++] = disp2; // mov eax, [rbp-disp2]
-    code[i++] = 0x89; code[i++] = 0x45; code[i++] = disp1; // mov [rbp-disp1], eax
+    code[i++] = 0x8B; code[i++] = 0x45; code[i++] = disp2; 
+    code[i++] = 0x89; code[i++] = 0x45; code[i++] = disp1; 
     return i;
 }
 
+static int retorno_condicional(unsigned char code[], int i,
+                               Operand cond, Operand retv) {
+    i = gerar_codigo_load_eax(code, i, cond);
 
-// NOVA FUNÇÃO: Implementação do retorno condicional
-static int retorno_condicional(unsigned char code[], int i, int cond_var, int ret_var) {
-    unsigned char disp_cond, disp_ret;
-    
-    // Carregar variável de condição em EAX
-    if (!get_disp_for_vn(cond_var, &disp_cond)) {
-        fprintf(stderr, "Erro: vn inválido no zret (condição): v%d\n", cond_var);
-        return i;
-    }
-    code[i++] = 0x8B; code[i++] = 0x45; code[i++] = disp_cond;
-    
-    // Testar se é zero (test eax, eax)
-    code[i++] = 0x85; code[i++] = 0xC0;
-    
-    // Jump se não zero (continuar execução)
-    code[i++] = 0x75; 
-    int jump_pos = i;  // Posição para pular se condição não for zero
-    code[i++] = 0x00;  // Placeholder para o offset
-    
-    // Se zero: carregar valor de retorno e retornar
-    if (!get_disp_for_vn(ret_var, &disp_ret)) {
-        fprintf(stderr, "Erro: vn inválido no zret (retorno): v%d\n", ret_var);
-        return i;
-    }
-    code[i++] = 0x8B; code[i++] = 0x45; code[i++] = disp_ret;
-    
-    // Epílogo e retorno
+    code[i++] = 0x85;
+    code[i++] = 0xC0;
+
+    code[i++] = 0x75;         
+    int jump_pos = i;
+    code[i++] = 0x00;        
+
+    i = gerar_codigo_load_eax(code, i, retv);
+
     i = add_epilogo(code, i);
-    
-    // Calcular e preencher o jump offset
+
     int jump_offset = i - (jump_pos + 1);
     code[jump_pos] = (unsigned char)jump_offset;
-    
+
     return i;
 }
 
-// NOVA FUNÇÃO: Implementação do retorno incondicional com variável
+
 static int retorno_incondicional_var(unsigned char code[], int i, int ret_var) {
     unsigned char disp;
     
-    // Carregar valor de retorno
-    if (!get_disp_for_vn(ret_var, &disp)) {
+    if (!obter_deslocamento_para_vn(ret_var, &disp)) {
         fprintf(stderr, "Erro: vn inválido no ret: v%d\n", ret_var);
         return i;
     }
     code[i++] = 0x8B; code[i++] = 0x45; code[i++] = disp;
     
-    // Epílogo e retorno
     i = add_epilogo(code, i);
     
     return i;
 }
 
-
-
 static void dump_bytes(const unsigned char* buf, int len) {
-    fprintf(stderr, "Generated %d bytes:\n", len);
+    fprintf(stderr, "%d bytes:\n", len);
     for (int j = 0; j < len; ++j) {
         fprintf(stderr, "%02X ", buf[j]);
         if ((j + 1) % 16 == 0) fprintf(stderr, "\n");
@@ -311,7 +302,6 @@ void gera_codigo(FILE* f, unsigned char code[], funcp* entry) {
     char op;
     int started = 0;
 
-    // structures to support call patching and function offsets
     int* func_offsets = NULL;
     int func_count = 0;
     int func_cap = 0;
@@ -328,10 +318,9 @@ void gera_codigo(FILE* f, unsigned char code[], funcp* entry) {
     }
 
     while (fgets(linha, sizeof(linha), f)) {
-        linha[strcspn(linha, "\r\n")] = 0; // remove newline CR/LF
+        linha[strcspn(linha, "\r\n")] = 0; 
 
         if (strcmp(linha, "function") == 0) {
-            // record offset for this new function
             if (func_count == func_cap) {
                 func_cap = func_cap ? func_cap * 2 : 8;
                 func_offsets = (int*)realloc(func_offsets, func_cap * sizeof(int));
@@ -342,43 +331,43 @@ void gera_codigo(FILE* f, unsigned char code[], funcp* entry) {
             continue;
         }
 
-        // NOVO: Retorno condicional 'zret vX vY'
-        if (sscanf(linha, "zret v%d v%d", &v1, &v2) == 2) {
-            i = retorno_condicional(code, i, v1, v2);
+        char zt1[64], zt2[64];
+        if (sscanf(linha, "zret %63s %63s", zt1, zt2) == 2) {
+            Operand cond, retv;
+            if (!parsear_token_para_operando(zt1, &cond) ||
+                !parsear_token_para_operando(zt2, &retv)) {
+                fprintf(stderr, "Erro: tokens inválidos em zret: %s %s\n", zt1, zt2);
+            } else {
+                i = retorno_condicional(code, i, cond, retv);
+            }
             continue;
         }
 
-        // NOVO: Retorno incondicional com variável 'ret vX'
         if (sscanf(linha, "ret v%d", &v) == 1) {
             i = retorno_incondicional_var(code, i, v);
             continue;
         }
 
-        // vN = <token> <op> <token>  (general arithmetic)
         char t1[64], t2[64];
         if (sscanf(linha, "v%d = %63s %c %63s", &v, t1, &op, t2) == 4) {
             Operand lhs, rhs;
-            if (parse_token_to_operand(t1, &lhs) && parse_token_to_operand(t2, &rhs)) {
-                i = opera_exp_general(code, i, v, lhs, op, rhs);
+            if (parsear_token_para_operando(t1, &lhs) && parsear_token_para_operando(t2, &rhs)) {
+                i = gerar_codigo_operacao_binaria(code, i, v, lhs, op, rhs);
                 continue;
             }
-            // else fallthrough
         }
 
-        // call: vD = call N ARG
         int target_idx;
         char argtok[64];
         if (sscanf(linha, "v%d = call %d %63s", &v, &target_idx, argtok) == 3) {
-            // prepara argumento em ECX
+
             i = carrega_token_edi(code, i, argtok);
 
-            // emitir CALL rel32 placeholder
             code[i++] = 0xE8;
             int rel_pos = i;
-            // escreve zeros temporários
+
             code[i++] = 0; code[i++] = 0; code[i++] = 0; code[i++] = 0;
 
-            // registrar patch
             if (patch_count == patch_cap) {
                 patch_cap = patch_cap ? patch_cap * 2 : 8;
                 patches = (CallPatch*)realloc(patches, patch_cap * sizeof(CallPatch));
@@ -387,24 +376,21 @@ void gera_codigo(FILE* f, unsigned char code[], funcp* entry) {
             patches[patch_count].target_index = target_idx;
             patch_count++;
 
-            // após retorno em EAX, armazenar em v
             unsigned char disp;
-            if (!get_disp_for_vn(v, &disp)) {
+            if (!obter_deslocamento_para_vn(v, &disp)) {
                 fprintf(stderr, "Erro: dest vn inválido no call: v%d\n", v);
             }
             else {
-                code[i++] = 0x89; code[i++] = 0x45; code[i++] = disp; // mov [rbp-disp], eax
+                code[i++] = 0x89; code[i++] = 0x45; code[i++] = disp; 
             }
             continue;
         }
 
-        // vN = vM  (atribuição direta)
         if (sscanf(linha, "v%d = v%d", &v1, &v2) == 2) {
             i = atribui_var(code, v1, v2, i);
             continue;
         }
 
-        // vN = p0 (atribui p0 para vN)
         if (sscanf(linha, "v%d = p0", &v) == 1) {
             i = efetua_op(code, v, i);
             continue;
@@ -439,7 +425,6 @@ void gera_codigo(FILE* f, unsigned char code[], funcp* entry) {
         return;
     }
 
-    // patch calls now that func_offsets are known
     for (int p = 0; p < patch_count; ++p) {
         int rel_pos = patches[p].rel_pos;
         int tidx = patches[p].target_index;
@@ -453,10 +438,8 @@ void gera_codigo(FILE* f, unsigned char code[], funcp* entry) {
         memcpy(&code[rel_pos], &rel32, 4);
     }
 
-    // debug: mostrar bytes gerados
-    dump_bytes(code, i);
+    //dump_bytes(code, i);
 
-    // Substitua o código abaixo para usar mmap no Linux
     size_t allocSize = CODE_SIZE;
     unsigned char* mem = (unsigned char*)mmap(NULL, allocSize, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (mem == MAP_FAILED) {
@@ -469,16 +452,13 @@ void gera_codigo(FILE* f, unsigned char code[], funcp* entry) {
     memset(mem, 0x90, allocSize);
     memcpy(mem, code, i);
 
-    // ajustar proteção (opcional)
     if (mprotect(mem, allocSize, PROT_READ | PROT_EXEC) == -1) {
         perror("mprotect failed");
     }
 
-    // entry aponta para a função 0 (primeira definida)
     if (func_count > 0) {
-        *entry = (funcp)(mem + func_offsets[0]);
-    }
-    else {
+        *entry = (funcp)(mem + func_offsets[func_count - 1]);
+    } else {
         *entry = (funcp)mem;
     }
 

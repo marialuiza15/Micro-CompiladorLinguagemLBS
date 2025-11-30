@@ -13,7 +13,7 @@ int main(int argc, char* argv[]) {
 
     gera_codigo(fp, code, &funcLBS);
 
-    int res = (*funcLBS)(5);
+    int res = (*funcLBS)(10);
     printf("Resultado = %d\n", res);
 
     fclose(fp);

@@ -1,7 +1,5 @@
 function
-v0 = p0 + $10
-v1 = p0 - $5
-zret v1 v0
-v2 = v1 * $2
-ret v2
+zret $0 $123
+v0 = p0 + $5
+ret v0
 end
